@@ -1,28 +1,53 @@
 import uvicorn
-from fastapi import FastAPI,Request
+from fastapi import FastAPI
+from pydantic import BaseModel, field_validator
 from src.graphs.graph_builder import GraphBuilder
 from src.llms.groqllm import GroqLLM
 
-import os
 from dotenv import load_dotenv
 load_dotenv()
 
 app = FastAPI()
 
-os.environ["LANGSMITH_API_KEY"] = os.getenv("LANGSMITH_API_KEY") 
+
+class BlogRequest(BaseModel):
+    topic: str
+    language: str = ""
+
+    @field_validator("topic")
+    @classmethod
+    def validate_topic(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("topic must not be blank")
+        return value
+
+    @field_validator("language")
+    @classmethod
+    def validate_language(cls, value: str) -> str:
+        value = value.strip().lower()
+        if value not in {"", "english", "hindi", "french"}:
+            raise ValueError("language must be english, hindi, or french")
+        return value
+
 
 @app.post("/blogs")
-async def create_blogs(request: Request):
-    data = await request.json()
-    topic = data.get("topic", "")
+async def create_blogs(request: BlogRequest):
+    topic = request.topic
+    language = request.language
 
     groqllm = GroqLLM()
     llm = groqllm.get_llm()
 
     graph_builder = GraphBuilder(llm)
-    if topic:
+
+    if language:
+        graph = graph_builder.setup_graph(usecase="language")
+        state = graph.invoke({"topic": topic, "current_language": language})
+
+    else:
         graph = graph_builder.setup_graph(usecase="topic")
-        state=graph.invoke({"topic": topic})
+        state = graph.invoke({"topic": topic})
 
     return {"data": state}
 
